@@ -22,7 +22,7 @@ from torch.optim import AdamW
 from sklearn.metrics import accuracy_score, f1_score
 from tqdm import tqdm
 from transformers import AutoProcessor, CLIPVisionModel
-from huggingface_hub import login
+from huggingface_hub import HfApi
 
 # Early preprocessing of the data which includes signs other than the alphabet and a test dataset which is not usable due to its small size.
 
@@ -131,14 +131,14 @@ class CLIPVisionClassifier(nn.Module):
 
     def forward(self, pixel_values):
         outputs = self.model(pixel_values=pixel_values)  # Forward pass to get image features
-        image_features = outputs.pooler_output  # Get the pooled feature representation (aggregated image features)
+        image_features = outputs.pooler_output  # Get the pooled feature representation
 
         # Pass the feature vector through the classifier
         logits = self.classifier(image_features)
         return logits
 
 
-# Initialize model with classifier
+# Initialise model with classifier
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = CLIPVisionClassifier(clip_model=clip_model, num_classes=26).to(device)
 
@@ -235,24 +235,19 @@ for epoch in range(num_epochs):
     device=device
     )
 
-model.save_pretrained("clipvision-asl-fingerspelling")
-processor.save_pretrained("clipvision-asl-fingerspelling")
-
-# Save the entire model (including the classifier head)
+# Save the entire model weights (including the classifier head)
 torch.save(model.state_dict(), "clipvision-asl-fingerspelling.pth")
 
-# Save the configuration of the CLIPVisions model
+# Save the configuration of CLIPVision model
 model.model.config.save_pretrained("clipvision-asl-fingerspelling")
 
-# Save the processor (used for preprocessing the images)
+# Save the processor
 processor.save_pretrained("clipvision-asl-fingerspelling")
 
-from huggingface_hub import HfApi
-
+# Push to HuggingFace
 api = HfApi()
 token = ''
 
-# Push the files to your repo
 api.upload_file(
     path_or_fileobj="clipvision-asl-fingerspelling.pth",
     path_in_repo="pytorch_model.bin",
@@ -266,52 +261,7 @@ api.upload_folder(
     token=token
 )
 
-# Test loop
-def test(model, dataloader, device):
-    model.eval()
-    total_correct = 0
-    total_samples = 0
-    all_predictions = []
-    all_true_labels = []
-
-    with torch.no_grad():
-        for batch in dataloader:
-            pixel_values = batch["pixel_values"].to(device)
-            labels = batch["label"].to(device)
-
-            # Forward pass
-            logits = model(pixel_values=pixel_values)
-
-            # Predicted labels
-            predicted_indices = torch.argmax(logits, dim=1)
-
-            # Collect predictions and true labels for F1 score calculation
-            all_predictions.extend(predicted_indices.cpu().tolist())
-            all_true_labels.extend(labels.cpu().tolist())
-
-            # Calculate accuracy
-            correct_predictions = (predicted_indices == labels).sum().item()
-            total_correct += correct_predictions
-            total_samples += len(labels)
-
-    # Compute accuracy
-    accuracy = total_correct / total_samples
-
-    # Compute F1 score
-    f1 = f1_score(all_true_labels, all_predictions, average="macro")  # Weighted for imbalanced datasets
-
-    print(f"Test Accuracy: {accuracy:.4f}")
-    print(f"Test F1 Score: {f1:.4f}")
-
-    return accuracy, f1
-
-test_accuracy, test_f1 = test(
-    model=model,
-    dataloader=test_loader,
-    device=device
-)
-
-def test(model, dataloader, device, index_to_label):
+def test(model, dataloader, device, index2label):
     model.eval()
     total_correct = 0
     total_samples = 0
@@ -348,11 +298,11 @@ def test(model, dataloader, device, index_to_label):
     weighted_f1 = f1_score(all_true_labels, all_predictions, average='weighted', zero_division=0)
 
     # Compute per-class F1 scores (not weighted)
-    class_f1_scores = f1_score(all_true_labels, all_predictions, average=None, labels=list(index_to_label.keys()), zero_division=0)
+    class_f1_scores = f1_score(all_true_labels, all_predictions, average=None, labels=list(index2label.keys()), zero_division=0)
 
     # Map F1 scores to actual class labels
-    for i, score in zip(index_to_label.keys(), class_f1_scores):
-        per_class_f1[index_to_label[i]] = score
+    for i, score in zip(index2label.keys(), class_f1_scores):
+        per_class_f1[index2label[i]] = score
 
     # Print the results
     print(f"Test Accuracy: {accuracy:.4f}")
@@ -364,14 +314,13 @@ def test(model, dataloader, device, index_to_label):
 
     return accuracy, weighted_f1, per_class_f1
 
+# Reversing the label2index to get index2label
+index2label = {idx: label for label, idx in label2index.items()}
 
-# Example usage:
-# Reversing the label2index to get index_to_label
-index_to_label = {idx: label for label, idx in label2index.items()}
-
+# Testing
 test_accuracy, test_weighted_f1, test_per_class_f1 = test(
     model=model,
     dataloader=test_loader,
     device=device,
-    index_to_label=index_to_label
+    index2label=index2label
 )
