@@ -75,7 +75,7 @@ if __name__ == "__main__":
     model, processor, device = load_model()
 
     # Make a prediction
-    image_path = r"C:\Users\aleks\Documents\MA2.0\imlla\dataset\ASL_Alphabet_Dataset\my_test\A\A.JPG"
+    image_path = ""
     predicted_letter, confidence = classify_image(image_path, model, processor, device)
 
     # Display image and predicted class
